@@ -108,6 +108,36 @@ static void *overlayBoundingBox(void                         *frame,
     return frame;
 }
 
+static void *overlayPcbDefectCount(void                             *frame,
+                                   std::map<std::string,uint8_t>    &pcbDefectCount,
+                                   int32_t                          outDataWidth,
+                                   int32_t                          outDataHeight)
+{
+    Mat img = Mat(outDataHeight, outDataWidth, CV_8UC3, frame);
+    float txtSize = static_cast<float>(outDataWidth)/POSTPROC_DEFAULT_WIDTH;
+    int   rowSize = 40 * outDataWidth/POSTPROC_DEFAULT_WIDTH;
+    Scalar text_color(255, 0, 0);
+    Scalar text_bg_color(5, 11, 120);
+    int j = 0;
+    for (auto i = pcbDefectCount.begin(); i != pcbDefectCount.end(); i++)
+    {
+        std::string text = i->first + ":" + std::to_string(i->second);
+        int32_t row = ++j;
+        Size totalTextSize = getTextSize(text, FONT_HERSHEY_SIMPLEX, txtSize, 2,
+                                         nullptr);
+        Point bgTopleft = Point(0, (rowSize * row) - totalTextSize.height - 5);
+        Point bgBottomRight = Point(totalTextSize.width + 10, (rowSize * row) + 1 + 5);
+        Point fontCoord = Point(5, rowSize * row);
+
+        rectangle(img, bgTopleft, bgBottomRight, text_bg_color, -1);
+        putText(img, text, fontCoord, FONT_HERSHEY_SIMPLEX, txtSize,
+                text_color, 2);
+    }
+
+
+    return frame;
+}
+
 void *PostprocessImageObjDetect::operator()(void           *frameData,
                                             VecDlTensorPtr &results)
 {
@@ -216,6 +246,10 @@ void *PostprocessImageObjDetect::operator()(void           *frameData,
 
     int32_t numEntries = resultRo[0]->numElem/lastDims[0];
 
+    std::map<std::string, uint8_t>  pcbDefectCount;
+
+    bool overlayPcbDefectCountFlag = false;
+
     for (auto i = 0; i < numEntries; i++)
     {
         float score;
@@ -256,6 +290,27 @@ void *PostprocessImageObjDetect::operator()(void           *frameData,
 
         overlayBoundingBox(frameData, box, m_config.outDataWidth,
                             m_config.outDataHeight, objectname);
+
+        if (objectname == "open" || objectname == "short" ||
+            objectname == "mousebite" || objectname == "spur" ||
+            objectname == "copper" || objectname == "pin-hole")
+        {
+            if (pcbDefectCount.find(objectname) != pcbDefectCount.end())
+            {
+                pcbDefectCount[objectname] += 1;
+            }
+            else
+            {
+                pcbDefectCount[objectname] = 1;
+            }
+            overlayPcbDefectCountFlag = true;
+        }
+
+        if (overlayPcbDefectCountFlag)
+        {
+            overlayPcbDefectCount(frameData, pcbDefectCount,
+                                    m_config.outDataWidth, m_config.outDataHeight);
+        }
 
 #if defined(EDGEAI_ENABLE_OUTPUT_FOR_TEST)
         output.append(objectname + "[ ");
