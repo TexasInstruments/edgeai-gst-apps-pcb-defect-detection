@@ -188,6 +188,8 @@ class PostProcessClassification(PostProcess):
 class PostProcessDetection(PostProcess):
     def __init__(self, flow):
         super().__init__(flow)
+        self.pcb_defect_type = ["open", "short", "mousebite", "spur",
+                                "copper", "pin-hole"]
 
     def __call__(self, img, results):
         """
@@ -226,6 +228,9 @@ class PostProcessDetection(PostProcess):
             bbox[..., (0, 2)] /= self.model.resize[0]
             bbox[..., (1, 3)] /= self.model.resize[1]
 
+        pcb_defect_count = {i:0 for i in self.pcb_defect_type}
+        overlay_pcb_count = False
+
         for b in bbox:
             if b[5] > self.model.viz_threshold:
                 if type(self.model.label_offset) == dict:
@@ -239,6 +244,13 @@ class PostProcessDetection(PostProcess):
                     class_name = "UNDEFINED"
 
                 img = self.overlay_bounding_box(img, b, class_name)
+
+                if class_name in self.pcb_defect_type:
+                    pcb_defect_count[class_name] += 1
+                    overlay_pcb_count = True
+
+        if overlay_pcb_count:
+            img = self.overlay_pcb_count(img, pcb_defect_count)
 
         if self.debug:
             self.debug.log(self.debug_str)
@@ -284,6 +296,46 @@ class PostProcessDetection(PostProcess):
             self.debug_str += class_name
             self.debug_str += str(box) + "\n"
 
+        return frame
+
+    def overlay_pcb_count(self, frame, pcb_defect_count):
+        """
+        overlay defect counts of different types in given frame
+
+        Args:
+            frame (numpy array): Input image where the overlay should be drawn
+            pcb_count : Dict containing no of defects of each type
+        """
+        font = cv2.FONT_HERSHEY_SIMPLEX
+        font_size = frame.shape[1] / 1280
+        row_size = 40 * frame.shape[1] // 1280
+        row = 1
+
+        for k,v in pcb_defect_count.items():
+            if v == 0:
+                continue
+            text = "%s:%d" % (k,v)
+            text_size, _ = cv2.getTextSize(text, font, font_size, 2)
+
+            bg_top_left = (0, (row_size * row) - text_size[1] - 5)
+            bg_bottom_right = (text_size[0] + 10, (row_size * row) + 1 + 5)
+            font_coord = (5, row_size * row)
+
+            cv2.rectangle(frame,
+                         bg_top_left,
+                         bg_bottom_right,
+                         (5, 11, 120),
+                         -1)
+            cv2.putText(
+                frame,
+                text,
+                font_coord,
+                font,
+                font_size,
+                (255, 0, 0),
+                2,
+            )
+            row = row + 1
         return frame
 
 
